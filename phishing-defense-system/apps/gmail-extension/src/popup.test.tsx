@@ -30,4 +30,18 @@ describe("extension popup", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Backend offline");
     expect(screen.getByRole("alert")).toHaveTextContent("Start FastAPI");
   });
+
+  it("explains when the Gmail content script is not loaded", async () => {
+    vi.stubGlobal("chrome", {
+      storage: { local: { get: vi.fn().mockResolvedValue({}), set: vi.fn().mockResolvedValue(undefined) } },
+      tabs: {
+        query: vi.fn().mockResolvedValue([{ id: 7, url: "https://mail.google.com/mail/u/0/#inbox/message" }]),
+        sendMessage: vi.fn().mockRejectedValue(new Error("Receiving end does not exist"))
+      }
+    });
+    render(<Popup />);
+    fireEvent.change(screen.getByLabelText("Email source"), { target: { value: "gmail" } });
+    fireEvent.click(screen.getByRole("button", { name: "Analyze Current Email" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sentinel could not load on this Gmail tab. Reload Gmail and try again.");
+  });
 });

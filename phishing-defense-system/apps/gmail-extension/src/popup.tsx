@@ -71,6 +71,12 @@ async function currentGmailEmail(): Promise<EmailSourceMetadata> {
   if (typeof chrome === "undefined" || !chrome.tabs) throw new Error("Gmail analysis is available only in the installed extension.");
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id || !tab.url?.startsWith("https://mail.google.com/")) throw new Error("Open and select a Gmail message, then try again.");
+  try {
+    const ping = await chrome.tabs.sendMessage(tab.id, { type: "PING_CONTENT_SCRIPT" } satisfies RuntimeMessage);
+    if (!ping?.ok || ping.source !== "sentinel-content-script") throw new Error("Unexpected ping response");
+  } catch {
+    throw new Error("Sentinel could not load on this Gmail tab. Reload Gmail and try again.");
+  }
   const response = await chrome.tabs.sendMessage(tab.id, { type: "GET_CURRENT_EMAIL" } satisfies RuntimeMessage);
   if (!response?.ok) throw new Error(response?.error ?? "Gmail metadata is unavailable.");
   return response.email as EmailSourceMetadata;

@@ -13,6 +13,10 @@ async function extractCurrent() {
 }
 
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, _sender, sendResponse) => {
+  if (message.type === "PING_CONTENT_SCRIPT") {
+    sendResponse({ ok: true, source: "sentinel-content-script" });
+    return false;
+  }
   if (message.type !== "GET_CURRENT_EMAIL") return false;
   void extractCurrent().then((email) => sendResponse({ ok: true, email })).catch((error) => sendResponse({
     ok: false, error: error instanceof EmailSourceUnavailableError ? error.message : "Gmail metadata is unavailable."
