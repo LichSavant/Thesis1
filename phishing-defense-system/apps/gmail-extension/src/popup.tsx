@@ -7,7 +7,7 @@ import { ApiError, processEmail } from "./services/api";
 import { loadSettings, saveSettings, type ExtensionSettings } from "./services/settings";
 import "./popup.css";
 
-const defaultSettings: ExtensionSettings = { backendUrl: "http://localhost:8000", sourceMode: "mock", automaticTracking: false, includeLinks: false };
+const defaultSettings: ExtensionSettings = { backendUrl: "http://127.0.0.1:8000", sourceMode: "mock", automaticTracking: false, includeLinks: false };
 
 export function Popup() {
   const [settings, setSettings] = useState(defaultSettings);

@@ -28,7 +28,8 @@ export class GmailEmailSourceAdapter implements EmailSourceAdapter {
     };
     if (this.options.includeLinks) metadata.links = this.extractLinks(container);
     if (this.options.includeBody && this.options.bodyAuthorized) {
-      const body = container.querySelector<HTMLElement>("[data-message-id] .a3s, .a3s")?.innerText.trim();
+      const body = this.firstWithin(container, GMAIL_SELECTORS.messageBody)?.innerText
+        .replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
       if (body) metadata.bodyText = body.slice(0, 20_000);
     }
     return metadata;
@@ -37,8 +38,9 @@ export class GmailEmailSourceAdapter implements EmailSourceAdapter {
   currentMessageContainer(): HTMLElement | null {
     for (const selector of GMAIL_SELECTORS.messageContainers) {
       const candidates = Array.from(this.root.querySelectorAll<HTMLElement>(selector));
-      const visible = candidates.find((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
-      if (visible) return visible;
+      const visible = candidates.filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+      // In expanded threads Gmail may keep several message containers visible; the last is the active/latest message.
+      if (visible.length) return visible[visible.length - 1];
     }
     return null;
   }

@@ -2,6 +2,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from typing import Literal
 
 
 class ApiModel(BaseModel):
@@ -93,7 +94,14 @@ class DetectedBehavior(ApiModel):
     evidence: str
 
 
+class TechnicalIndicator(ApiModel):
+    type: Literal["sender_domain_mismatch", "suspicious_url"]
+    evidence: str
+
+
 class AnalyzeEmailResponse(ApiModel):
+    scan_id: str
+    scanned_at: datetime
     message_id: str
     classification: Classification
     email_risk_score: int = Field(ge=0, le=100)
@@ -102,3 +110,24 @@ class AnalyzeEmailResponse(ApiModel):
     detected_behaviors: list[DetectedBehavior]
     recommendation: str
     model_version: str | None = None
+
+
+class ScanFeedbackRequest(ApiModel):
+    scan_id: str = Field(min_length=1, max_length=512)
+    message_id: str = Field(min_length=1, max_length=512)
+    action: str = Field(pattern=r"^(reported_suspicious|view_full_analysis)$")
+    created_at: datetime
+
+
+class EmailScanResponse(AnalyzeEmailResponse):
+    subject: str
+    sender_name: str
+    sender_email: EmailStr
+    sender_domain: str
+    url_count: int = Field(ge=0)
+    suspicious_urls: list[str]
+    technical_indicators: list[TechnicalIndicator]
+    phishing_probability: float | None = Field(default=None, ge=0, le=1)
+    user_reported: bool
+    email_opened: bool
+    view_full_analysis_selected: bool = False

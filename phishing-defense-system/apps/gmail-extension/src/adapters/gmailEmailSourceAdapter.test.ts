@@ -24,4 +24,20 @@ describe("GmailEmailSourceAdapter fixture", () => {
     document.body.innerHTML = "<main role='main'></main>";
     await expect(new GmailEmailSourceAdapter(document).extractCurrentEmail()).rejects.toThrow("Open a Gmail message");
   });
+  it("normalizes formatted message text only when explicitly authorized", async () => {
+    document.body.innerHTML = `<h2 class="hP">Formatted</h2><div data-legacy-message-id="html-1"><span email="sender@example.com" name="Sender"></span><div class="a3s"><b>Urgent</b><br>verify account</div></div>`;
+    const body = document.querySelector<HTMLElement>(".a3s")!; Object.defineProperty(body, "innerText", { value: "Urgent   verify account\n\n\nnow" });
+    const result = await new GmailEmailSourceAdapter(document, { includeBody: true, bodyAuthorized: true }).extractCurrentEmail();
+    expect(result.bodyText).toBe("Urgent verify account\n\nnow");
+  });
+  it("deduplicates multiple links from the selected message", async () => {
+    document.body.innerHTML = `<h2 class="hP">Links</h2><div data-legacy-message-id="links-1"><span email="sender@example.com" name="Sender"></span><div class="a3s"><a href="https://one.example/a">one</a><a href="https://two.example/b">two</a><a href="https://one.example/a">again</a></div></div>`;
+    const result = await new GmailEmailSourceAdapter(document, { includeLinks: true }).extractCurrentEmail();
+    expect(result.links).toHaveLength(2);
+  });
+  it("uses the latest visible message in a conversation thread", async () => {
+    document.body.innerHTML = `<h2 class="hP">Thread</h2><div data-legacy-message-id="older"><span email="old@example.com" name="Old"></span><div class="a3s">old</div></div><div data-legacy-message-id="latest"><span email="new@example.com" name="New"></span><div class="a3s">new</div></div>`;
+    const result = await new GmailEmailSourceAdapter(document).extractCurrentEmail();
+    expect(result.messageId).toBe("latest"); expect(result.senderEmail).toBe("new@example.com");
+  });
 });
