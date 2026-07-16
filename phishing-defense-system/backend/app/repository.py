@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
-from .schemas import EmailOpenRequest, RiskLevel, ScoreSource, TrackedEmailResponse
+from .schemas import AnalyzeEmailRequest, EmailOpenRequest, EmailScanResponse, RiskLevel, ScoreSource, TrackedEmailResponse
 
 
 class TrackedEmailRepository:
@@ -51,7 +51,70 @@ class TrackedEmailRepository:
                 );
                 CREATE INDEX IF NOT EXISTS email_interactions_lookup_idx
                     ON email_interactions(user_id, message_id, interaction_type, event_timestamp);
+                CREATE TABLE IF NOT EXISTS email_scans (
+                    scan_id TEXT PRIMARY KEY, message_id TEXT NOT NULL, scanned_at TEXT NOT NULL, result_json TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS scan_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, scan_id TEXT NOT NULL, message_id TEXT NOT NULL,
+                    action TEXT NOT NULL, created_at TEXT NOT NULL
+                );
+                DELETE FROM scan_feedback WHERE id NOT IN (
+                    SELECT MIN(id) FROM scan_feedback GROUP BY scan_id, action
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS scan_feedback_action_unique_idx
+                    ON scan_feedback(scan_id, action);
             """)
+
+    def record_scan(self, result, request: AnalyzeEmailRequest) -> EmailScanResponse:
+        suspicious_urls = [item.evidence for item in result.detected_behaviors if item.type == "suspicious_url"]
+        technical = [{"type": item.type, "evidence": item.evidence} for item in result.detected_behaviors if item.type in {"sender_domain_mismatch", "suspicious_url"}]
+        record = EmailScanResponse(
+            **result.model_dump(), subject=request.subject, sender_name=request.sender_name,
+            sender_email=request.sender_email, sender_domain=request.sender_domain, url_count=len(request.links),
+            suspicious_urls=suspicious_urls, technical_indicators=technical, phishing_probability=None,
+            user_reported=False, email_opened=True,
+        )
+        with self.connection() as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO email_scans (scan_id, message_id, scanned_at, result_json) VALUES (?, ?, ?, ?)",
+                (result.scan_id, result.message_id, result.scanned_at.isoformat(), record.model_dump_json(by_alias=True)),
+            )
+        return record
+
+    def record_feedback(self, request) -> bool:
+        with self.connection() as connection:
+            exists = connection.execute("SELECT 1 FROM email_scans WHERE scan_id = ? AND message_id = ?", (request.scan_id, request.message_id)).fetchone()
+            if not exists: return False
+            connection.execute(
+                "INSERT OR IGNORE INTO scan_feedback (scan_id, message_id, action, created_at) VALUES (?, ?, ?, ?)",
+                (request.scan_id, request.message_id, request.action, request.created_at.isoformat()),
+            )
+        return True
+
+    def get_scan(self, scan_id: str) -> EmailScanResponse | None:
+        with self.connection() as connection:
+            row = connection.execute("SELECT result_json FROM email_scans WHERE scan_id = ?", (scan_id,)).fetchone()
+            actions = {item["action"] for item in connection.execute("SELECT action FROM scan_feedback WHERE scan_id = ?", (scan_id,)).fetchall()}
+        if not row: return None
+        data = json.loads(row["result_json"])
+        if "subject" not in data: return None
+        data["userReported"] = "reported_suspicious" in actions
+        data["viewFullAnalysisSelected"] = "view_full_analysis" in actions
+        return EmailScanResponse.model_validate(data)
+
+    def list_scans(self) -> list[EmailScanResponse]:
+        with self.connection() as connection:
+            rows = connection.execute("SELECT result_json FROM email_scans ORDER BY scanned_at DESC").fetchall()
+            reported = {row["scan_id"] for row in connection.execute("SELECT DISTINCT scan_id FROM scan_feedback WHERE action = 'reported_suspicious'").fetchall()}
+            viewed = {row["scan_id"] for row in connection.execute("SELECT DISTINCT scan_id FROM scan_feedback WHERE action = 'view_full_analysis'").fetchall()}
+        results = []
+        for row in rows:
+            data = json.loads(row["result_json"])
+            if "subject" not in data: continue
+            data["userReported"] = data.get("scanId") in reported
+            data["viewFullAnalysisSelected"] = data.get("scanId") in viewed
+            results.append(EmailScanResponse.model_validate(data))
+        return results
 
     def record_email_open(
         self,

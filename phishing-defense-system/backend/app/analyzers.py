@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from urllib.parse import urlparse
+from datetime import datetime, timezone
+from uuid import uuid4
 
 from .schemas import (
     AnalysisRiskLevel, AnalyzeEmailRequest, AnalyzeEmailResponse, Classification, DetectedBehavior,
@@ -48,6 +50,7 @@ class RuleBasedAnalyzer(Analyzer):
             else "No strong prototype indicators were detected; remain cautious with unexpected requests."
         )
         return AnalyzeEmailResponse(
+            scan_id=str(uuid4()), scanned_at=datetime.now(timezone.utc),
             message_id=request.message_id, classification=classification, email_risk_score=score,
             risk_level=level, score_source="rule-based", detected_behaviors=behaviors,
             recommendation=recommendation, model_version=None,

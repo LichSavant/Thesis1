@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import get_settings
 from .analyzers import RuleBasedAnalyzer
 from .repository import TrackedEmailRepository
-from .schemas import AnalyzeEmailRequest, AnalyzeEmailResponse, EmailOpenRequest, HealthResponse, TrackedEmailResponse
+from .schemas import AnalyzeEmailRequest, AnalyzeEmailResponse, EmailOpenRequest, EmailScanResponse, HealthResponse, ScanFeedbackRequest, TrackedEmailResponse
 from .services import EmailInteractionService
 
 settings = get_settings()
@@ -36,9 +36,30 @@ def record_email_open(request: EmailOpenRequest) -> TrackedEmailResponse:
     return service.record_open(request)
 
 
-@app.post("/api/v1/analyze-email", response_model=AnalyzeEmailResponse)
-def analyze_email(request: AnalyzeEmailRequest) -> AnalyzeEmailResponse:
-    return analyzer.analyze(request)
+@app.post("/api/v1/analyze-email", response_model=EmailScanResponse)
+def analyze_email(request: AnalyzeEmailRequest) -> EmailScanResponse:
+    result = analyzer.analyze(request)
+    return repository.record_scan(result, request)
+
+
+@app.post("/api/v1/scan-feedback")
+def record_scan_feedback(request: ScanFeedbackRequest) -> dict[str, bool]:
+    if not repository.record_feedback(request):
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return {"ok": True}
+
+
+@app.get("/api/v1/email-scans/{scan_id}", response_model=EmailScanResponse)
+def get_email_scan(scan_id: str) -> EmailScanResponse:
+    result = repository.get_scan(scan_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    return result
+
+
+@app.get("/api/v1/email-scans", response_model=list[EmailScanResponse])
+def list_email_scans() -> list[EmailScanResponse]:
+    return repository.list_scans()
 
 
 @app.get("/api/v1/tracked-emails", response_model=list[TrackedEmailResponse])

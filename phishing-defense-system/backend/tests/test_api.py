@@ -85,8 +85,30 @@ def test_rule_analyzer_detects_behaviors_and_labels_source(client: TestClient) -
     result = response.json()
     assert result["scoreSource"] == "rule-based"
     assert result["modelVersion"] is None
+    assert result["phishingProbability"] is None
+    assert result["subject"] == analysis_payload()["subject"]
+    assert result["technicalIndicators"]
     types = {item["type"] for item in result["detectedBehaviors"]}
     assert {"urgency", "credential_request", "sender_domain_mismatch", "suspicious_url"} <= types
+
+
+def test_scan_can_be_listed_loaded_and_feedback_is_idempotent(client: TestClient) -> None:
+    from backend.app import main
+    scan = client.post("/api/v1/analyze-email", json=analysis_payload()).json()
+    scan_id = scan["scanId"]
+    assert client.get(f"/api/v1/email-scans/{scan_id}").json()["senderEmail"] == "security@unrelated-example.com"
+    feedback = {"scanId": scan_id, "messageId": scan["messageId"], "action": "reported_suspicious", "createdAt": "2026-01-01T00:01:00Z"}
+    assert client.post("/api/v1/scan-feedback", json=feedback).status_code == 200
+    assert client.post("/api/v1/scan-feedback", json=feedback).status_code == 200
+    assert client.get("/api/v1/email-scans").json()[0]["userReported"] is True
+    with main.repository.connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM scan_feedback WHERE scan_id = ? AND action = ?", (scan_id, "reported_suspicious")).fetchone()[0] == 1
+
+
+def test_missing_scan_returns_404(client: TestClient) -> None:
+    assert client.get("/api/v1/email-scans/not-found").status_code == 404
+    feedback = {"scanId": "not-found", "messageId": "missing", "action": "reported_suspicious", "createdAt": "2026-01-01T00:01:00Z"}
+    assert client.post("/api/v1/scan-feedback", json=feedback).status_code == 404
 
 
 def test_mock_analysis_preserves_demo_score(client: TestClient) -> None:
